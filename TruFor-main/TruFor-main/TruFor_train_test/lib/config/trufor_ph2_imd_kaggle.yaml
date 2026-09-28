@@ -1,0 +1,61 @@
+# 阶段2（定位网络）训练配置 —— Kaggle 2×Tesla T4 适配版
+# 与官方 trufor_ph2.yaml / 本机 trufor_ph2_imd.yaml 的差异：
+#   - 只用 IMD2020 单数据集（Kaggle 数据集挂载，根目录由环境变量 TRUFOR_IMD 注入）
+#   - BATCH_SIZE_PER_GPU: 2 -> 8，两张 T4 共 16 张/step（官方单卡 A6000 是 18），
+#     因此 LR 直接沿用官方 0.005，不需要线性缩放
+#   - END_EPOCH: 100 -> 30。官方 100 epoch 是配 5 个数据集（近百万张）的，
+#     IMD 只有 1868 张训练图，跑到 30 epoch（≈7000 step）已足够，更长只会过拟合
+#   - VALID.EVERY: 5。整图验证（141 张、最大边 1024）实测比训练还贵，每 5 个 epoch 验一次
+#   - CUDNN.BENCHMARK: true。训练输入固定 512×512，可以让 cuDNN 挑最快算法
+# 用法（在 TruFor_train_test 目录下；-g 必须紧跟 GPU 编号、放在 -exp 之前，
+# 因为 argparse 的 -g 是 nargs='+'，会吞掉后面的 TRAIN.xxx 覆盖项）：
+#   python train.py -g 0 1 -exp trufor_ph2_imd_kaggle
+CUDNN:
+  BENCHMARK: true
+  DETERMINISTIC: false
+  ENABLED: true
+WORKERS: 8
+
+DATASET:
+  TRAIN: [IMD]
+  VALID: [IMD]
+  NUM_CLASSES: 2
+  CLASS_WEIGHTS: [0.5, 2.5]
+MODEL:
+  NAME: detconfcmx
+  PRETRAINED: 'pretrained_models/segformers/mit_b2.pth'
+  MODS: ('RGB','NP++')
+  EXTRA:
+      BACKBONE: mit_b2
+      DECODER: MLPDecoder
+      DECODER_EMBED_DIM: 512
+      PREPRC: 'imagenet'
+      BN_EPS: 0.001
+      BN_MOMENTUM: 0.1
+      NP_WEIGHTS: 'pretrained_models/noiseprint++/noiseprint++.th'
+      MODULES: ['NP++','backbone','loc_head']
+      FIX_MODULES: ['NP++']
+LOSS:
+  LOSSES:
+    - [ 'LOC', 1.0, 'dice_entropy' ]
+  SMOOTH: 0
+TRAIN:
+  PRETRAINING:
+  IMAGE_SIZE: [512,512]
+  BATCH_SIZE_PER_GPU: 8
+  SHUFFLE: true
+  BEGIN_EPOCH: 0
+  END_EPOCH: 30
+  OPTIMIZER: sgd
+  LR: 0.005
+  WD: 0.0005
+  MOMENTUM: 0.9
+  NESTEROV: false
+  IGNORE_LABEL: -1
+  AUG: 'lib/config/aug_res_comp.yaml'
+VALID:
+  FIRST_VALID: false
+  EVERY: 5
+  MAX_SIZE: 1024
+  BEST_KEY: 'avg_p-F1_smooth'
+  AUG: 'lib/config/aug_res_comp.yaml'

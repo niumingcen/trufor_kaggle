@@ -1,0 +1,33 @@
+# TruFor 训练最小依赖（已从官方 trufor_conda.yaml 精简）
+# 说明：原 yaml 里的 mmcv-full / mmsegmentation / mmcls / jpegio 在代码中并未被 import，
+#      实测全仓库无引用，故移除 —— 可省掉最麻烦的 mmcv CUDA 扩展编译环节。
+# 用法：pip install -r requirements_min.txt （配合 python 3.7 + torch 1.11.0+cu113）
+
+numpy==1.21.5
+scipy==1.7.3
+pandas==1.3.5
+pillow==9.0.1
+matplotlib==3.5.2
+seaborn==0.11.2
+scikit-image==0.16.2
+scikit-learn==1.0.2
+networkx==2.5
+imageio==2.21.1
+opencv-python==4.5.5.64
+
+albumentations==1.2.1
+qudida==0.0.4
+cython==0.29.28
+
+pyyaml==6.0
+yacs==0.1.8
+addict==2.4.0
+tqdm==4.64.0
+prettytable==3.3.0
+tabulate==0.8.10
+
+timm==0.5.4
+torch-dct==0.1.5
+torchsummary==1.5.1
+tensorboard==2.9.1
+tensorboardx==2.5.1

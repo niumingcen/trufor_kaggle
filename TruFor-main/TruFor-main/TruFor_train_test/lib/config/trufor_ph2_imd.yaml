@@ -1,0 +1,55 @@
+# 阶段2（定位网络）训练配置 —— 本机 RTX 3070 Laptop 8GB 适配版
+# 与官方 trufor_ph2.yaml 的差异：
+#   - 只用 IMD2020 单数据集（其它数据集本机尚未准备）
+#   - BATCH_SIZE_PER_GPU: 18 -> 2（官方值是 32GB V100 的配置）
+#   - WORKERS: 16 -> 4（CPU 8C/16T）
+# 用法：python train.py -exp trufor_ph2_imd
+CUDNN:
+  BENCHMARK: false
+  DETERMINISTIC: false
+  ENABLED: false
+WORKERS: 4
+
+DATASET:
+  TRAIN: [IMD]
+  VALID: [IMD]
+  NUM_CLASSES: 2
+  CLASS_WEIGHTS: [0.5, 2.5]
+MODEL:
+  NAME: detconfcmx
+  PRETRAINED: 'pretrained_models/segformers/mit_b2.pth'
+  MODS: ('RGB','NP++')
+  EXTRA:
+      BACKBONE: mit_b2
+      DECODER: MLPDecoder
+      DECODER_EMBED_DIM: 512
+      PREPRC: 'imagenet'
+      BN_EPS: 0.001
+      BN_MOMENTUM: 0.1
+      NP_WEIGHTS: 'pretrained_models/noiseprint++/noiseprint++.th'
+      MODULES: ['NP++','backbone','loc_head']
+      FIX_MODULES: ['NP++']
+LOSS:
+  LOSSES:
+    - [ 'LOC', 1.0, 'dice_entropy' ]
+  SMOOTH: 0
+TRAIN:
+  PRETRAINING:
+  IMAGE_SIZE: [512,512]
+  BATCH_SIZE_PER_GPU: 2
+  SHUFFLE: true
+  BEGIN_EPOCH: 0
+  END_EPOCH: 100
+  OPTIMIZER: sgd
+  LR: 0.005
+  WD: 0.0005
+  MOMENTUM: 0.9
+  NESTEROV: false
+  IGNORE_LABEL: -1
+  AUG: 'lib/config/aug_res_comp.yaml'
+VALID:
+  FIRST_VALID: false
+  # 官方 2048：验证时按原图尺寸推理，8GB 显存有 OOM 风险，先压到 1024
+  MAX_SIZE: 1024
+  BEST_KEY: 'avg_p-F1_smooth'
+  AUG: 'lib/config/aug_res_comp.yaml'

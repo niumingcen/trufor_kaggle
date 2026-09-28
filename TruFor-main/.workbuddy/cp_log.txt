@@ -1,0 +1,3 @@
+586M	/home/mash1r0/datasets/IMD2020
+414
+4s

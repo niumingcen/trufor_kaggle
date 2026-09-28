@@ -1,0 +1,38 @@
+=== key apt packages ===
+build-essential: not-installed
+python3-pip: not-installed
+python3-dev: not-installed
+git: installed
+curl: installed
+wget: installed
+cmake: not-installed
+pkg-config: not-installed
+libgl1: installed
+libglib2.0-0: installed
+ffmpeg: not-installed
+=== python / conda ===
+Python 3.10.12
+no conda dir
+/usr/bin/python3: No module named pip
+=== gcc ===
+bash: line 12: gcc: command not found
+=== disk ===
+Filesystem      Size  Used Avail Use% Mounted on
+/dev/sdd       1007G  1.3G  955G   1% /
+D:\             233G   17G  217G   8% /mnt/d
+C:\             217G  128G   89G  59% /mnt/c
+=== network (http code / seconds) ===
+pypi.org            : 200 4.897122s
+tuna-pypi           : 200 4.683433s
+repo.anaconda(mini) : 200 4.952983s
+mirrors.tuna/anaconda: 200 0.457226s
+github.com          : 000 10.002678s
+archive.ubuntu.com  : 200 0.557258s
+mirrors.ubuntu(tuna): 200 0.202985s
+=== nvidia wsl libs ===
+libcuda.so
+libcuda.so.1
+libcuda.so.1.1
+libcudadebugger.so.1
+libd3d12.so
+=== done ===

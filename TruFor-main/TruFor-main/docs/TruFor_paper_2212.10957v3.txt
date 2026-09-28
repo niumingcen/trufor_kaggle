@@ -1,0 +1,1354 @@
+===== PAGE 1 =====
+TruFor: Leveraging all-round clues for trustworthy image forgery
+detection and localization
+Fabrizio Guillaro1 Davide Cozzolino1 Avneesh Sud2 Nicholas Dufour2 Luisa Verdoliva1
+1University Federico II of Naples 2Google Research
+Abstract
+In this paper we present TruFor, a forensic framework
+that can be applied to a large variety of image manipula-
+tion methods, from classic cheapfakes to more recent ma-
+nipulations based on deep learning. We rely on the ex-
+traction of both high-level and low-level traces through
+a transformer-based fusion architecture that combines the
+RGB image and a learned noise-sensitive fingerprint. The
+latter learns to embed the artifacts related to the cam-
+era internal and external processing by training only on
+real data in a self-supervised manner. Forgeries are de-
+tected as deviations from the expected regular pattern that
+characterizes each pristine image. Looking for anomalies
+makes the approach able to robustly detect a variety of lo-
+cal manipulations, ensuring generalization. In addition to
+a pixel-level localization map and a whole-image integrity
+score, our approach outputs a reliability map that high-
+lights areas where localization predictions may be error-
+prone. This is particularly important in forensic applica-
+tions in order to reduce false alarms and allow for a large
+scale analysis. Extensive experiments on several datasets
+show that our method is able to reliably detect and local-
+ize both cheapfakes and deepfakes manipulations outper-
+forming state-of-the-art works. Code is publicly available
+at https://grip-unina.github.io/TruFor/.
+1. Introduction
+Manipulating images has never been easier, with new
+powerful editing tools appearing by the day. These new
+opportunities stimulate the creativity of benign and mali-
+cious users alike. Previously, crafting a multimedia disin-
+formation campaign required sophisticated skills, and at-
+tackers could do little more than copy, replicate or remove
+objects in an image, classic forms of image manipulations
+also known as “cheapfakes”. With the explosive growth of
+deep learning, image manipulation tools have become both
+easier to use and more powerful, allowing users to generate
+on-the-fly images of persons that do not exist or to realize
+Noiseprint++
+Extraction
+Confidence
+Analysis
+Forgery
+Detection
+Integrity Score
+Anomaly
+Analysis
+Figure 1. TruFor detects and localizes image forgeries (in yellow).
+It is based on the extraction of a learned noise-sensitive fingerprint,
+Noiseprint++, which is combined with the RGB image to output an
+anomaly localization map. Noiseprint++ is also used jointly with
+the image to compute the confidence map, which estimates the less
+reliable regions of the anomaly heatmap (black areas), e.g. the
+false positive region in lower right. The confidence and anomaly
+maps are then used together to produce a global integrity score.
+credible deepfakes. Diffusion models enable the creation of
+realistic image edits using natural language prompts, photo-
+realistically adapting the inserted manipulation to the style
+and lighting of the context [1, 35].
+The risks posed by such tools in the wrong hands are
+obvious. Indeed, in recent years there has been a grow-
+ing interest on the part of governments and funding agen-
+cies in developing forensic tools capable of countering such
+attacks. A major focus is on local image edits, particu-
+larly partial modifications that change the image seman-
+tics (for example the partially manipulated image in Fig. 1,
+where the two real faces have been replaced with GAN-
+generated ones [28]). Multimedia forensics and related sci-
+entific fields have seen a rapid increase in activity in re-
+sponse to such challenges, with a large number of methods
+and tools proposed for image forgery detection and localiza-
+1
+arXiv:2212.10957v3  [cs.CV]  25 May 2023
+===== PAGE 2 =====
+tion [41]. Despite considerable advances in the area, current
+SOTA detectors are not yet performant enough for in-the-
+wild deployment, due mainly to deficiencies in several ar-
+eas subject to intense research: i) limited generalization; ii)
+limited robustness; iii) insufficient detection performance.
+Limited generalization is the inability of detectors to
+cope with out-of-distribution manipulations. Some detec-
+tors are built to exploit well-defined low-level features, e.g.,
+traces of JPEG compression, demosaicking or interpola-
+tion [2, 6, 37], while others are typically developed to work
+well only on specific types of manipulations, like splicing
+[27, 40]. In addition, in a realistic scenario images also un-
+dergo numerous forms of non-malicious degradation, (e.g.
+recompression, resizing, etc) - also called laundering. For
+example, social networks compress and resize uploaded im-
+ages, both of which can easily remove forensic traces. Fi-
+nally, most SOTA methods perform image forgery localiza-
+tion, leaving detection as an afterthought [11], which is typ-
+ically derived as a global integrity score from the localiza-
+tion heatmap itself [23, 39, 46]. Few methods address the
+detection task directly [8, 33, 42, 50]. As a result, detection
+accuracy is poor, with a high false alarm rate. In a realis-
+tic setting where manipulated images are rare, such perfor-
+mance could cause more problems than it solves, with false
+positives drastically outnumbering true positives.
+This work addresses such shortcomings, with a focus on
+robust detection under varied manipulations. Our aim is to
+first establish whether the image under analysis has been
+manipulated or not, and subsequently consider forgery lo-
+calization only for images where a forgery has been de-
+tected. To perform in a real-world scenario where im-
+ages undergo many post-processing steps that may atten-
+uate forensic traces, our design was guided by the need to
+leverage information at multiple scales (both low and high-
+level features) even in complex scenarios. Our framework
+estimates a confidence map that associates localization re-
+sults with region-specific uncertainty, allowing many poten-
+tial false alarms to be rejected. The block diagram of our
+method is presented in Fig. 1. Overall, in this work we make
+the following key contributions:
+• we propose a new framework, TruFor, which outputs
+a global integrity score, an anomaly-based localization
+map and an associated confidence map;
+• we propose a new noise-sensitive fingerprint,
+Noiseprint++, with enhanced robustness to image
+laundering;
+• we combine low-level and high-level evidence to per-
+form anomaly analysis, which together with the confi-
+dence analysis provide more reliable decisions;
+• we carry out extensive experiments on several bench-
+marks, considering new and challenging scenarios, and
+demonstrate that our method achieves state-of-the-art
+performance in both detection and localization tasks.
+2. Related Work
+Forensic artifacts. Low-level artifacts are caused by the
+in-camera acquisition process, such as the sensor, the lens,
+the color filter array or the JPEG quantization tables. In all
+cases, these are very weak traces, that can be highlighted by
+suppressing the image content by means of high-pass filters
+or denoising. The most common filters used for this task are
+the spatial rich models (SRM) [17], often included as a pre-
+processing step in some CNN models for forensic analysis.
+In [38] a set of around 30 fixed high-pass filters are used,
+instead in [3] the high-pass filters are learnt during training.
+These fixed and trainable filters have been used in many
+other subsequent works to perform a noise sensitive analysis
+[8, 22, 46, 48, 51]. A different perspective is considered in
+[12], where the extraction of low-level artifacts is carried
+out by learning a sort of “camera model fingerprint”, the
+noiseprint, that bears traces of in-camera processing steps.
+When a manipulation is present, the noiseprint structure is
+absent and this anomaly is interpreted as a forgery. In this
+work we leverage noiseprint and further enhance it so as to
+make it work in more challenging scenarios.
+In general, low-level features are combined with high-
+level ones to carry out a more effective detection. Pioneer-
+ing work in the field is the two-branch approach proposed
+in [51], where the features of the noise and RGB stream are
+combined together through bilinear pooling. Other works
+also propose late fusion [8], while others [22, 42, 46] per-
+form early fusion or even middle fusion [26]. We belong to
+this last category, but use an approach that fuses noise and
+RGB channels using cross-modal feature calibration [30].
+Forgery detection vs localization. The majority of the
+state-of-the-art methods focus on image localization, with
+architectures often inspired by semantic segmentation, and
+detection is a byproduct of such analysis [11]. The in-
+tegrity score is computed by a suitable post-processing of
+the localization heatmap aimed at extracting a global deci-
+sion statistic, such as the average or the maximum value
+of the heatmap [5, 23, 46]. Only a few works explicitly
+treat the detection problem. In particular, some recent ap-
+proaches [8,31,42,50] jointly train the model both for local-
+ization and detection through suitable losses at image-level.
+In [42, 50] global average pooling is applied to the middle
+features, while in [8] max average pooling is carried out
+on the localization heatmap. A different perspective can be
+found in [33], where it is proposed to analyze the whole
+image avoiding resizing (so as not to lose precious foren-
+sics traces) through a gradient checkpointing technique, that
+helps for the joint optimization of patch-level feature extrac-
+tion and image-level decision.
+Different from current literature, in this paper we explic-
+itly design a forgery detection module that takes as input
+the anomaly-based map and the confidence map. This addi-
+2
+===== PAGE 3 =====
+Anomaly
+Decoder
+Layer 1
+Layer 2
+Layer 3
+L4
+Encoder
+Confidence
+Decoder
+Forgery 
+Detector
+Pooling
+x
+r
+f
+a
+c
+y
+Integrity
+Score
+hNoiseprint++
+Extractor
+Figure 2. TruFor framework. The Noiseprint++ extractor takes the RGB image to obtain a learned noise-sensitive fingerprint. The encoder
+uses both the RGB input and Noiseprint++ for jointly computing the features that will be used by the anomaly decoder and the confidence
+decoder for pixel-level forgery localization and confidence estimation, respectively. The forgery detector exploits the localization map and
+the confidence map to make the image-level decision. The different colors identify the modules learned in each of the three training phases.
+tional input is crucial to reduce the number of false alarms
+on pristine data and provide a more trustworthy tool.
+Reliability in multimedia forensics Designing reliable de-
+tectors is important in several computer vision applications,
+however, it is even more critical for our task, since foren-
+sic traces are often imperceptible to visual inspection. The
+problem is even more relevant when deep learning based
+methods are used, since image forensics tools are chal-
+lenged by out-of-distribution data [41]. In the context of
+JPEG artifacts and resampling analysis, initial efforts to de-
+velop reliable forensics detectors are carried out in [4, 32],
+where it is proposed to use Bayesian neural networks that
+provide an uncertainty range with every prediction. In this
+way, the user can quantify trust on the final prediction.
+Inspired by [9], our work aims at making a further step in
+this direction and proposes a method using external uncer-
+tainty quantification [19] to design a confidence map from
+the anomaly localization heatmap.
+3. Method
+In this Section we begin by presenting an overview of
+TruFor, which is illustrated in Fig. 2. Subsequent subsec-
+tions will provide the details of each component. First of all,
+from the input RGB image, x, we extract its Noiseprint++,
+r =R(x), a learned noise-sensitive fingerprint of the same
+resolution asx. Then, both x andr feed two networks that
+extract the anomaly mapa and the confidence mapc of the
+image. These networks have the same encoder-decoder ar-
+chitecture, with a shared encoder that extracts suitable dense
+features,f =E(x,r ), which are processed by the anomaly
+decoder to extract the anomaly map, a = DA(f), and
+by the confidence decoder to extract the confidence map,
+c =DC(f). The information gathered in the anomaly map
+is summarized in a compact descriptor, h = P(a,c ), by
+means of a weighted pooling block, with weights depend-
+ing on the confidence information. Finally, this descriptor is
+processed by a classifier which computes an integrity score,
+y =C(h).
+Integrity score, anomaly map and confidence map are all
+provided to the final user for further analyses. At a first
+level, only the integrity score is necessary to perform auto-
+mated forgery detection. In case a fake is detected, the user
+can dive deeper using the anomaly map to identify manip-
+ulated suspected regions, along with the confidence map to
+distinguish valid predictions of forged regions from random
+anomalies. For pristine images, instead, the anomaly map
+does not localize possible forgeries but only random statis-
+tical anomalies, and should be discarded.
+3.1. Noiseprint++
+Motivation. Digital images are marked by a long trail
+of subtle, invisible traces. These may have many distinct
+origins, from the unavoidable imperfections of the camera
+hardware, to the in-camera processing steps of image acqui-
+sition, to all the out-camera processes encountered by the
+image during its lifetime. When images are manipulated,
+these telltale traces may be corrupted, an event that, if de-
+tected, allows one to carry out powerful forensic analyses.
+In [12] a deep learning-based method has been proposed
+to extract from each image its noiseprint, an image-size pat-
+tern where all traces related to in-camera processing steps
+are collected and emphasized. This is trained in a self-
+supervised manner using only pristine images. While this
+ensures it can be trained on a large corpus, it shows limited
+robustness to image impairments induced by out-camera
+processes. This is a significant shortcoming, considering
+3
+===== PAGE 4 =====
+different
+model
+different
+position
+different
+editing
+Model AModel B
+Editing 
+History
+1
+N …
+…
+Crop
+Noiseprint++ Extractor
+Figure 3. Noiseprint++ training procedure. Each image is sub-
+jected to a different combination of processing operations, namely
+editing history . Different crops are extracted from real images
+taken from many different cameras. During training, the distance
+between the outputs is minimized for patches coming from the
+same camera model, same position and same editing history.
+that many forms of impairments are possible during the life-
+time of an image. To overcome this limitation, we propose
+Noiseprint++, an improved image fingerprint which high-
+lights traces related not only to in-camera but also to out-
+camera processes. In other words, Noiseprint++ captures
+information not only on the camera model but also on its
+editing history, improving its reliability.
+Self-supervised contrastive learning. The proposed
+Noiseprint++ extractor learns patch-level self-similarities
+by means of contrastive learning. Similar to [12], we adopt
+the DnCNN architecture [49] with 15 trainable layers, 3 in-
+put channels, 1 output channel. The extractor is trained on
+patches of 64×64 pixels randomly extracted from images of
+the dataset. Training is aimed at obtaining the same noise-
+sensitive fingerprint for patches that share the same proper-
+ties and different noise residuals for patches that are differ-
+ent under some respect. Figure 3, in particular, highlights
+that two patches are considered different, and hence char-
+acterized by different noise residuals, when they (i) come
+from different sources; (ii) are drawn from different spatial
+positions; (iii) have different editing histories. These con-
+straints, in turn, aim at telling apart patches(i) generated by
+different cameras, (ii) moved from one spatial location to
+another and (iii) coming from images that have been differ-
+ently post-processed. This latter property, in particular, dis-
+tinguishes Noiseprint++ from its ancestor and improves its
+effectiveness. We adopt the InfoNCE contrastive loss [24]:
+Lcontr =−
+X
+i∈B
+log
+P
+j∈Nie−s(i,j)
+P
+j∈B−{i}e−s(i,j) (1)
+whereB is a batch of patches, s(i,j ) is the squared Eu-
+clidean distance betweeni-th andj-th residual patches, and
+Ni is the subset of patches with the same origin, position
+and editing history as the i-th patch. During contrastive
+learning, we introduce a large variety of possible editing
+Noiseprint++ SRM filteringNoiseprintImage
+Figure 4. From left to right: manipulated image, Noiseprint++,
+Noiseprint and residual obtained through SRM-based filtering. We
+can notice that forensic artifacts are much more enhanced using
+our learned noise-sensitive fingerprint. In particular, we can ob-
+serve the typical8×8 grid that characterizes JPEG compressed im-
+ages and Noiseprint++ can highlight the grid inconsistencies over
+the forged area better than Noiseprint.
+Noiseprint++
+ Spliced area Pristine areaImage
+Figure 5. Example of a manipulated image and its Noiseprint++,
+which clearly shows a JPEG grid misalignment caused by the com-
+position. This is visible in the spliced area (red), but not in the
+pristine one (blue), as highlighted in the zoomed regions where +
+indicates a JPEG grid boundary.
+operations, such as resizing, compression and illumination
+changes, for a total of 512 different history pipelines.
+In Fig. 4 we show two examples of Noiseprint++ com-
+pared to noiseprint and some standard spatial domain resid-
+uals (SRM filters), while in Fig. 5 we show a manipulated
+image where we can notice a JPEG grid misalignment in
+correspondence to the forged area.
+3.2. Anomaly localization map
+We treat the forgery localization task as a supervised bi-
+nary segmentation problem and combine the Noiseprint++
+information with the high-level features from the RGB im-
+age. To this end, we adopt the CMX architecture [30],
+a cross-modal fusion framework originally designed for
+multi-modal semantic segmentation, but easily general-
+izable to other tasks. Features from input image and
+Noiseprint++ are extracted on two parallel branches which
+have a shared encoder architecture from a semantic segmen-
+tation method. In particular, we rely on SegFormer [47], a
+hierarchical network based on a Transformer encoder. In-
+teraction is carried out between each stage using a Cross-
+Modal Feature Rectification Module, which calibrates the
+information coming from one modality using features ex-
+4
+===== PAGE 5 =====
+tracted from the other modality. The calibration helps to fil-
+ter out noisy information of a modality using the knowledge
+of the other modality. The rectified features of both modal-
+ities are provided as input to the Feature Fusion Module,
+which uses a cross-attention mechanism to merge them into
+a single feature map. The fused feature maps of all stages
+represent the input of the decoder, which is used to gener-
+ate the final anomaly map. For the decoder, we keep the
+lightweight multilayer perceptron used in SegFormer [47].
+Details are provided in the Supplementary.
+During phase 2 training, the loss function is a combina-
+tion of the weighted cross-entropy and the dice loss [34]:
+L2 =λceLce + (1−λce)Ldice (2)
+with λce set experimentally to 0.3. The weighted cross-
+entropy loss is defined as
+Lce =− 1
+N
+X
+i
+γ0(1−gi) log(1−ai) +γ1gi logai (3)
+with gi and ai the i-th pixel of the ground truth and es-
+timated anomaly maps respectively, and N the number of
+pixels in the image. The weights γ0 andγ1, are set to 0.5
+and 2.5 to take into account the imbalance between pristine
+and fake pixels in the training-set.
+3.3. Confidence map and integrity score
+Many SoTA methods perform localization first, and then
+use some global statistics of the localization map to perform
+detection. We also need global statistics about anomalies,
+but the anomaly map cannot be blindly trusted, as it high-
+lights both manipulated areas and pristine areas with un-
+usual statistics. Hence we propose a method to compute
+a per-pixel confidence estimate of the predicted anomaly
+map, which is used to compute robust global statistics for
+detection. In the pooling block we compute four weighted
+statistics of the anomaly map, maximum, minimum, aver-
+age, and mean square, where the weights are drawn from
+the confidence map and help de-emphasize pristine anoma-
+lous areas of the image. In formulas
+aavg =
+X
+i
+´ciai; amax = log P
+i ´cieai (4)
+amsq =
+X
+i
+´cia2
+i ; amin =− log P
+i ´cie−ai (5)
+where ai and ´ci are the values of the anomaly and confi-
+dence maps at pixeli, respectively, the latter normalized to
+unit sum, and we adopt a smooth approximation of the min-
+imum and maximum functions. To these features we add
+the four corresponding features extracted from the confi-
+dence map cavg,c msq,c max,c min obtaining eventually a 8-
+component feature vector, h, which is used to predict the
+integrity scorey.
+The confidence and anomaly maps are generated in par-
+allel, by decoding the same input features with two decoders
+having the same architecture, as done in [9]. However,
+while the anomaly values point out statistical outliers, con-
+fidence values have to recognize which anomaly values can
+be trusted. Hence, the confidence decoder must be trained
+with suitable ad hoc reference data. To this end, we use
+another map,t, the true class probability map [9]:
+ti = (1−gi) (1−ai) +giai (6)
+where gi and ai are the pixel values of the localization
+ground truth and of the anomaly map. The ground truth val-
+ues,gi, are 1 for manipulated pixels and 0 for pristine ones.
+Therefore, the true class probability map is close to 1 when
+large anomaly values occur for manipulated pixels or small
+anomaly values occur for pristine pixels. Instead, it is close
+to 0 when manipulated pixels are not seen as anomalous or
+anomalies are detected in pristine data. This latter case is
+especially important as it may easily lead to false alarms.
+The confidence decoder must learn to identify and discard
+these wrong pieces of information. Hence, the confidence
+loss,Lconf , is defined as the mean squared error between
+the predicted confidence mapc and its referencet.
+Finally, to maximize the system reliability, the confi-
+dence decoder is trained jointly with the final binary clas-
+sifier. Therefore we train this phase using a weighted sum
+of confidence loss and detection loss
+L3 =Lconf +λdetLdet (7)
+whereLdet is the balanced cross-entropy on the predicted
+image-level integrity scorey andλdet is set to 0.5.
+4. Results
+4.1. Experimental Setup
+Training. Our approach includes three separate training
+steps. First, we train the Noiseprint++ extractor using a
+large dataset of pristine images publicly available on two
+popular photo-sharing websites: Flickr (www.flickr.com)
+and DPReview (www.dpreview.com). The whole dataset
+contains 24,757 images acquired from 1,475 different cam-
+era models (8 to 92 images per model) of 43 brands. Then,
+we train encoder and decoder of the anomaly localization
+network using the same datasets as proposed in CAT-Net
+v2 [26], comprising pristine and fake images with the cor-
+responding ground truths. Finally, using this same dataset,
+we train the confidence map decoder and the forgery de-
+tector. More details on these datasets can be found in the
+supplementary.
+Testing. We benchmarked our model on seven publicly
+available datasets and one more dataset of local manipu-
+lations created by us using diffusion models. More specif-
+ically, we use CASIA v1 [16], Coverage [44], Columbia
+5
+===== PAGE 6 =====
+Method CASIAv1+ Coverage Columbia NIST16 DSO-1 VIPP OpenFor. CocoGlide A VG
+best fixed best fixed best fixed best fixed best fixed best fixed best fixed best fixed best fixed
+ADQ [6] .494 .302 .167 .165 .401 .401 .238 .146 .483 .421 .549 .457 .644 .414 .302 .300 .410 .326
+Splicebuster [10] .252 .143 .321 .192 .811 .565 .312 .174 .662 .372 .432 .260 .459 .340 .434 .332 .460 .297
+EXIF-SC [23] .255 .106 .332 .164 .880 .798 .298 .227 .577 .442 .424 .215 .318 .175 .424 .293 .437 .303
+CR-CNN [48] .538 .481 .487 .391 .779 .631 .363 .300 .377 .289 .355 .282 .143 .110 .577 .447 .452 .366
+RRU-Net [5] .498 .408 .339 .279 .629 .575 .218 .154 .360 .312 .336 .272 .206 .157 .504 .416 .386 .322
+ManTraNet [46] .320 .180 .486 .317 .650 .508 .225 .172 .537 .412 .373 .255 .661 .551 .673 .516 .491 .364
+SPAN [22] .169 .112 .428 .235 .873 .759 .363 .228 .390 .233 .375 .223 .176 .089 .350 .298 .391 .272
+AdaCFA [2] .158 .128 .215 .183 .587 .403 .124 .106 .262 .235 .210 .184 .115 .098 .357 .314 .254 .206
+CAT-Net v2 [26] .852 .752 .582 .381 .923 .859 .417 .308 .673 .584 .672 .590 .947 .899 .603 .434 .709 .601
+IF-OSN [45] .676 .553 .472 .304 .836 .753 .449 .330 .621 .470 .508 .403 .204 .123 .589 .428 .544 .421
+MVSS-Net [8] .650 .528 .659 .514 .781 .729 .372 .320 .459 .358 .485 .389 .225 .117 .642 .486 .534 .430
+PSCC-Net [31] .670 .520 .615 .473 .760 .604 .210 .113 .733 .458 .309 .183 .353 .105 .685 .515 .542 .371
+Noiseprint [12] .205 .137 .342 .229 .835 .513 .345 .196 .811 .439 .546 .382 .675 .420 .405 .318 .521 .329
+TruFor (ours) .822 .737 .735 .600 .914 .859 .470 .399 .973 .930 .746 .693 .901 .827 .720 .523 .785 .696
+Table 1. Pixel-level F1 performance of image forgery localization. Results are shown for the metric computed using the best threshold per
+image and using a fixed threshold (0.5). First and second rankings are shown in bold and underlined respectively. For the fixed threshold,
+Splicebuster and Noiseprint have been evaluated after a Normalization between 0 and 1, since they provide maps in arbitrary ranges.
+[21], NIST16 [20], DSO-1 [14], and VIPP [7], which are ex-
+tensively used in the literature and include cheapfakes ma-
+nipulations, like splicing, copy-move and inpainting. Over-
+all these datasets comprise a total of 1530 fake images and
+1412 real ones. Then, we added OpenForensics [28] a large
+dataset of face manipulations generated using GAN mod-
+els, from which we sampled 2000 images, and CocoGlide,
+including 512 images we generated from the COCO 2017
+validation set [29] using the GLIDE diffusion model [35].
+Metrics. As in most of the previous works, we measure
+pixel-level performance in terms of F1, and report results
+using both the best threshold and the default 0.5 threshold.
+Instead, for image-level analysis we use AUC, which does
+not require setting a decision threshold, and balanced accu-
+racy, which takes into account both false alarms and missed
+detection, in which case the threshold is set again to 0.5.
+4.2. State-of-the-art comparison
+To ensure a fair comparison we considered only meth-
+ods with code and/or pre-trained models publicly avail-
+able on-line and run them on the selected testing datasets.
+Moreover, to avoid biases, we included only the approaches
+trained on datasets disjoint from the test datasets. Even-
+tually, we included two model-based methods: ADQ [6]
+that relies on JPEG artifacts, Splicebuster [10] that exploits
+noise artifacts; and 11 deep learning-based methods: EXIF
+SelfConsistency [23], Constrained R-CNN [48], RRU-Net
+[5], ManTraNet [46], SPAN [22], AdaCFA [2], E2E [33],
+CAT-Net v2 [26], IF-OSN [45], MVSS [8], PSCC-Net [31],
+Noiseprint [12]. A brief summary of these methods is pro-
+vided in Tab. 3.
+Localization results. In Tab. 1 we show the pixel-level lo-
+calization performance. Our method provides the best F1
+performance, on average, and is the best or second best on
+all datasets, which testifies of a remarkable generalization
+ability across manipulations. In fact, it performs well also
+on OpenForensics (GAN-based local manipulations), where
+most other methods fail catastrophically, except CAT-Net
+v2, as well as CocoGlide (diffusion-based local manipula-
+tions). Thanks to the use of Noiseprint++, with its digital
+history-based training, our method keeps working well on
+all the datasets.
+Detection results. Detection results are shown in Tab. 2.
+Note that we also consider methods that were not explicitly
+designed for this task, in which case we use the maximum
+of the localization map as the detection statistic, as it works
+better than the mean value. TruFor is the best performer on
+most datasets, and has the best average performance both
+in terms of AUC and Accuracy. On the contrary, many
+methods exhibit a very poor performance, close to random
+guessing (0.5). This phenomenon is especially acute for ac-
+curacy, which is highly sensitive to the choice of threshold
+(see supplementary). Indeed, lacking a suitable calibration
+dataset, setting the right threshold is a difficult problem, as
+also shown in [15]. Unlike most competitors, our approach
+guarantees an accuracy of almost 80% even in this challeng-
+ing case.
+Robustness analysis. In this section we carry out a ro-
+bustness analysis on images impaired by compression and
+resizing. To this end, we use three datasets uploaded on
+Facebook and Whatsapp - two provided in [45] and our
+CocoGlide. For compactness, in Tab. 4 we compare results
+only with the top three competitors according to the F1 per-
+formance (fixed threshold) of Tab. 1: IF-OSN, CAT-Net v2
+6
+===== PAGE 7 =====
+Method CASIAv1+ Coverage Columbia NIST16 DSO-1 VIPP CocoGlide A VG
+AUC Acc AUC Acc AUC Acc AUC Acc AUC Acc AUC Acc AUC Acc AUC Acc
+ADQ [6] .816 .523 .495 .495 .500 .500 .484 .503 .569 .560 .736 .551 .496 .496 .585 .518
+Splicebuster [10] .406 - .541 - .597 - .610 - .751 - .539 - .529 - .568 -
+EXIF-SC [23] .490 .500 .498 .500 .976 .506 .504 .500 .764 .500 .617 .500 .526 .500 .625 .501
+CR-CNN [48] .670 .535 .553 .510 .755 .628 .737 .641 .576 .535 .504 .558 .589 .533 .626 .563
+RRU-Net [5] .574 .488 .482 .500 .583 .500 .666 .500 .444 .500 .534 .500 .533 .503 .545 .499
+ManTraNet [46] .644 .500 .760 .500 .810 .500 .624 .500 .874 .500 .530 .500 .778 .500 .717 .500
+SPAN [22] .480 .487 .670 .605 .999 .951 .632 .597 .669 .510 .580 .572 .475 .491 .644 .602
+AdaCFA [2] .500 .500 .500 .500 .500 .500 .500 .500 .500 .500 .500 .500 .500 .500 .500 .500
+CAT-Net v2 [26] .942 .838 .680 .635 .977 .803 .750 .597 .747 .525 .813 .565 .667 .580 .797 .649
+IF-OSN [45] .735 .635 .557 .510 .882 .522 .658 .553 .853 .505 .696 .522 .611 .567 .713 .545
+MVSS-Net [8] .932 .808 .733 .545 .984 .667 .579 .538 .552 .485 .629 .522 .654 .536 .723 .586
+PSCC-Net [31] .869 .683 .657 .550 .300 .508 .485 .456 .650 .543 .574 .507 .777 .661 .616 .558
+E2E [33] .377 .433 .494 .505 .894 .639 .718 .603 .803 .565 .617 .543 .530 .525 .633 .545
+Noiseprint [12] .494 - .525 - .872 - .618 - .821 - .580 - .520 - .633 -
+TruFor (ours) .916 .813 .770 .680 .996 .984 .760 .662 .984 .930 .820 .761 .752 .639 .857 .781
+Table 2. Image-level AUC and balanced Accuracy performance of image forgery detection. Splicebuster and Noiseprint cannot be evaluated
+using a fixed threshold because they provide maps in arbitrary ranges.
+and MVSS-Net. TruFor performs consistently better than
+all competitors, even though IF-OSN was specifically pro-
+posed to deal with images transmitted via social networks,
+while the gap with respect to CAT-Net v2 and MVSS-Net
+widens significantly.
+Qualitative comparisons. In Fig. 6 we also show some
+visual results in order to gain a better insight into the qual-
+ity of the image localization maps and corresponding confi-
+dence maps. Together with some fakes, we show some real
+Input Type Task
+Acronym [ref] Artifact RGB Other L D
+ADQ [6] JPEG ✓ DCT analysis ✓
+Splicebuster [10] camera-based fixed HP filter ✓
+EXIF-SC [23] camera-based ✓ - ✓ ✓
+AdaCFA [2] demosaicing ✓ - ✓
+Noiseprint [12] camera-based ✓ - ✓
+ManTraNet [46] editing ✓ HP filters ✓ ✓
+RRU-Net [5] splicing ✓ - ✓ ✓
+SPAN [22] editing ✓ HP filters ✓
+CR-CNN [48] editing trainable HP filter ✓
+CAT-Net v2 [26] JPEG ✓ DCT filter ✓
+MVSS-Net [8] editing trainable HP filter ✓ ✓
+IF-OSN [45] editing ✓ - ✓
+PSCC-Net [31] editing ✓ - ✓ ✓
+E2E [33] editing ✓ noiseprint ✓
+Table 3. Methods used for comparison. We indicate the artifacts
+they rely on and the input type, if they work only on RGB and/or
+on noise features extracted through high-pass (HP) filtering. In ad-
+dition, we also indicate if they have been designed for localization
+(L), detection (D) or both.
+Method CASIAv1 DSO-1 CocoGlide
+Fb Wa Fb Wa Fb Wa
+IF-OSN [45] .513 .524 .484 .395 .406 .404
+CAT-Net v2 [26] .681 .508 .310 .247 .447 .443
+MVSS-Net [8] .469 .444 .356 .308 .347 .351
+TruFor (ours) .716 .713 .685 .465 .460 .461
+Table 4. Pixel-level F1 performance (using fixed threshold) on
+datasets uploaded on Facebook (Fb) and WhatsApp (Wa).
+Original Res Res&Cmp
+Version F1 AUC F1 AUC F1 AUC
+Noiseprint .706 .547 .375 .483 .342 .468
+Noiseprint++ .877 .913 .666 .745 .435 .566
+SegFormer (NP++) .974 .967 .925 .966 .649 .703
+SegFormer (RGB) .917 .903 .780 .792 .756 .786
+TruFor (NP++, RGB) .982 .974 .937 .944 .765 .730
+Table 5. Ablation results. Pixel-level F1 performance (using best
+threshold) and image-level AUC on original images, resized (Res)
+and resized and recompressed (Res&Cmp).
+images, for which the localization map can be erroneous. In
+these cases we show the anomaly map, which often presents
+some hot spots that could lead to false positives. Such errors
+are avoided in detection thanks to the additional confidence
+map. The user may inspect all these pieces of information
+to carry out further analyses. More qualitative results are
+shown in Supplementary.
+4.3. Ablation study
+In order to assess the individual impact of all design
+choices of our approach, we consider a simple baseline, the
+7
+===== PAGE 8 =====
+noiseprint-based method proposed in [12], and add the new
+key components one at a time. Experiments are carried out
+on a dataset of 1000 manipulated images built by download-
+ing pristine images from the web and editing them locally,
+so as to simulate a realistic scenario. Tab. 5 shows the re-
+sults (F1 and AUC) for the noiseprint baseline, the version
+with Noiseprint++, the method which includes transformer-
+based segmentation (using as inputs only RGB and only
+NP++), and the proposed method with joint analysis of
+Noiseprint++ and RGB image. We also perform this anal-
+ysis after resizing all images and after resizing and com-
+pressing them. The case with strongly impaired images is
+more challenging, but the proposed method keeps providing
+a good performance. In general, the inclusion of high-level
+segmentation information seems to provide the largest im-
+provement, justifying our focus on all-round clues.
+With Tab. 6 we study the effect of using the cross-entropy
+loss alone or jointly with the dice loss, with and without
+online augmentation with compressed and resized images.
+On the original data, results (F1 with best threshold) remain
+pretty stable in all cases. With resized and compressed data,
+instead, the joint use of cross-entropy and dice loss proves
+important, especially together with augmentation.
+Finally, in Tab. 7 we consider image-level detection and
+compare our method with two simplified versions that rely
+on a single global feature, the mean or the maximum of the
+anomaly map. First of all, it is clear that the mean is a poor
+decision statistic, and much better AUC results can be ob-
+tained by just switching to the maximum. However, even
+the maximum turns out to be almost useless without a cali-
+bration process that helps select a good decision threshold.
+So, in terms of accuracy, the feature vector used in the pro-
+posed method provides a large competitive advantage.
+Image Ground Truth Localizaion Map Conidence Map
+0.996
+0.998
+0.094
+0.264
+Figure 6. Fake images (top) and pristine images (bottom). In the
+last row, we show the confidence map that is able to correct the
+error in the localization map, hence improving the global integrity
+score (shown on the right).
+Original Res Res&Cmp
+Loss Aug best fixed best fixed best fixed
+CE .980 .926 .912 .824 .583 .397
+CE ✓ .981 .929 .885 .781 .575 .575
+CE+DL .973 .949 .865 .767 .655 .655
+CE+DL ✓ .982 .970 .937 .902 .765 .627
+Table 6. Localization ablation results: Pixel-level F1 performance
+(using best and fixed threshold).
+Original Res Res&Cmp
+score AUC Acc AUC Acc AUC Acc
+mean .544 .510 .604 .525 .592 .515
+max .974 .505 .944 .515 .730 .500
+Ours .996 .905 .949 .910 .740 .675
+Table 7. Detection ablation results: Image-level AUC and Accu-
+racy (best threshold).
+5. Conclusions
+In this paper we introduce TruFor, a novel framework
+for reliable image forgery detection and localization. It is
+built upon the extraction of a learned noise-sensitive finger-
+print, that enhances the in-camera and out-camera artifacts
+even in challenging scenarios, such as circulation on social
+networks. The model also provides a confidence map that
+represents an indication of possible false alarms on pris-
+tine areas. Our extensive experimental results demonstrate
+that our approach has a good generalizability and is able
+to localize even unknown manipulations, such as the recent
+DNN-based ones. Furthermore, it can provide reliable and
+robust detection results at image level thanks to the intro-
+duction of the confidence map. Our approach has certain
+limitations. First, it cannot detect fully generated images.
+Then, we train the anomaly map and detection score in sep-
+arate phases, requiring full pixel-level supervision. In future
+work, we would like to explore end-to-end training, allow-
+ing partial supervision from only image-level labels. We
+would also like to evaluate generalization on more recent
+generative models for local edits [1, 18].
+Acknowledgment. We gratefully acknowledge the sup-
+port of this research by the Defense Advanced Re-
+search Projects Agency (DARPA) under agreement num-
+ber FA8750-20-2-1004. In addition, this work has received
+funding by the European Union under the Horizon Europe
+vera.ai project, Grant Agreement number 101070093. It is
+also supported by a TUM-IAS Hans Fischer Senior Fellow-
+ship and by the PREMIER project, funded by the Italian
+Ministry of Education, University, and Research within the
+PRIN 2017 program. Finally, we would like to thank Chris
+Bregler for useful discussions and support.
+8
+===== PAGE 9 =====
+Supplementary Document
+In this appendix, we report the details of our approach
+(Sec. A) and of the datasets used in the experiments (Sec.
+B). Then, we include additional results to prove the robust-
+ness capability of our method (Sec. C) and its ability to
+provide good results also for the detection task (Sec. D).
+Furthermore, we show qualitative results by means of lo-
+calization and confidence maps and finally we present fail-
+ure cases (Sec. E). Code is publicly available at https:
+//grip-unina.github.io/TruFor/.
+A. Implementation details
+Architecture. The anomaly localization network is shown
+in Fig. 8. The feature extraction backbone in the en-
+coder is based on a transformer-based segmentation archi-
+tecture [47]. The RGB and the Noiseprint++ feature maps
+are combined using a Cross-Modal Feature Rectification
+Module (CM-FRM) [30]. Each feature extraction branch
+has 4 Transformer blocks, and a CM-FRM block between
+each transformer block. The Transformer blocks are based
+on the Mix Transformer encoder B2 (MiT-B2) proposed for
+semantic segmentation and are pretrained on ImageNet, as
+suggested in [47]. The Mix Transformer encoder includes
+self-attention mechanisms and channel-wise operations. It
+relies on spatial convolutions and not on positional encod-
+ings. This is important in order to work with images of any
+size and to obtain a localization map with the same resolu-
+tion as the input image.
+The CM-FRM block exploits the interactions between
+the image semantic (RGB) and residual (Noiseprint++) fea-
+tures. It performs channel-wise and spatial-wise rectifi-
+cations, which consists of a weighted sum of the feature
+map of both branches. The weights are calculated along
+the channel dimension and the spatial dimension sepa-
+rately, combining both feature maps. The Feature Fusion
+Module (FFM) uses an efficient cross-attention mechanism,
+without positional encoding, to merge the feature maps of
+Noiseprint++ and RGB image and the outputs of the four
+FFMs represent the input of the decoder. We use the All-
+MLP decoder proposed in [47], which is a lightweight ar-
+chitecture formed by only 1×1 convolution layers and bi-
+linear up-samplers. The decoder for the confidence map has
+the same All-MLP architecture. The forgery detector net-
+work takes as input the pooled features from anomaly and
+confidence maps, and consists of 2 fully connected layers
+with RELU activation: 8D→ 128D→ 1D output.
+Experiments have been conducted using one NVIDIA
+RTX A6000 GPU. Training times for each phase are 6.5
+days, 6 days, 2 days, respectively. The inference time is
+about 1.17 sec for an image of 3.2 megapixels. As for the
+model size, the number of parameters for TruFor is 68.7M,
+that are less than those used by the top three competitors:
+Real
+Fake
+Ground Truth
+Train Hot Dog Bear Donut Fire Hydrant
+Figure 7. Some examples of real and manipulated images and re-
+lated reference maps from the CocoGlide dataset. For each image
+we indicate the prompt that drives the synthetic generation.
+CAT-Net v2 (114.3M), MVSS-Net (146.9M) and IF-OSN
+(128.8M).
+Noiseprint++ training. For Noiseprint++ training, each
+batch includes 160 patches of 64× 64 pixels. These
+patches are obtained from 5 camera models and 4 differ-
+ent images for each camera model. The resulting 20 im-
+ages are subjected to 4 different editing histories, which are
+a combination of random resizing, compression and con-
+trast/brightness adjustments, for a total of 512 possible edit-
+ing histories. Training is performed for a total of 50 epochs,
+and each epoch includes 8800 training steps. An Adam op-
+timizer is used with an initial learning rate of 0.001, that is
+reduced by 10 times every 10 epochs.
+Localization and detection training. For localization and
+detection tasks we adopted the datasets used for training and
+validation also used in [26], which comprises both pristine
+and fake images with the corresponding reference maps.
+The input image is cropped to 512× 512 during training.
+Details of the dataset are reported in Tab. 8. To avoid bi-
+ases due to an imbalance in training dataset size, we sample
+each dataset equally for each training epoch. The networks
+are trained for 100 epochs with a batch size equal to 18 and
+a learning rate that starts with 0.005 and decays to zero. An
+SGD optimizer is used with a momentum of 0.9. Before
+Noiseprint++ extraction, we apply the following augmenta-
+tions on RGB inputs: resizing in the range [0.5 - 1.5] and
+JPEG compression with quality factor from 30 to 100.
+B. Datasets
+To ensure that Noiseprint++ is trained on unaltered im-
+ages, we verified that for each camera model, all collected
+images have the same resolution, are in JPEG format with
+the same quantization matrix and that no photo editing soft-
+ware is present in the metadata (e.g. photoshop, gimp).
+As for the anomaly localization and detection, the
+9
+===== PAGE 10 =====
+Transformer 
+Block
+Transformer 
+Block
+Transformer 
+Block
+All-MLP decoder
+Transformer 
+Block
+*1
+*1
+*2
+*3
+CM-
+FRM
+FFM
+Transformer 
+Block
+Transformer 
+Block
+*2
+CM-
+FRM
+FFM
+Transformer 
+Block
+Transformer 
+Block
+*3
+CM-
+FRM
+FFM
+*4
+CM-
+FRM
+FFM
+𝑀
+4 × 𝑁
+4
+𝑀 × 𝑁 𝑀
+8 × 𝑁
+8
+𝑀
+16 × 𝑁
+16
+𝑀
+32 × 𝑁
+32
+𝑀 × 𝑁
+Figure 8. Anomaly localization network.
+datasets used for training and testing are reported in Tab. 8.
+Training includes CASIA v2 [16], FantasticReality [25],
+IMD2020 [36] and a dataset of manipulated images cre-
+ated by [26] by applying splicing and copy-move using ei-
+ther COCO [29] training set or RAISE [13] as a source
+and object masks from COCO as target regions. For Open-
+Forensics [28] and NIST16 [20], we evaluate the perfor-
+mance on a test subset of 2000 images (out of 19,000)
+and 160 images, respectively. The latter choice follows the
+common train/test split that most of the recent works ap-
+ply [22, 42, 48, 51]. CocoGlide is a manipulated dataset
+generated by us using the COCO validation dataset [29].
+We extract 256× 256 pixel crops and then use an object
+mask and its corresponding label as the forgery region and
+the text prompt that are fed to GLIDE [35]. In this way,
+we generated new synthetic objects of the same category
+for a total of 512 manipulated images. Some examples are
+shown in Fig. 7. Note that we avoided overlap with [26],
+since CocoGlide is based on images from the validation set,
+while the tampered COCO dataset from the training set.
+C. Additional robustness analysis
+In this Section we include additional experiments to
+show the ability of our method to be robust to different
+forms of degradations and compare them with those ob-
+tained by the top performers [8, 26, 45]. We apply the fol-
+lowing transformations on the CASIA v1 dataset: gaussian
+blur (varying the kernel size), gaussian noise (varying the
+standard deviation), gamma correction (varying the power
+factor) and JPEG compression (varying the quality level).
+The results are shown in Fig. 9. We can observe that our
+method is more robust than the state-of-the-art irrespective
+of the type of degradation.
+We also check robustness to other social media networks,
+beyond those already considered in the main paper, i.e.
+Facebook and Whatsapp (Tab. 4 in main paper). More
+specifically, we use the whole dataset proposed in [45],
+where images from some standard forensic datasets, CA-
+SIA v11 [16], Columbia [21], DSO-1 [14] and NIST16 [20],
+were also uploaded on Weibo and WeChat. Results are pre-
+sented in Tab. 9 and show a consistent gain over all the dif-
+ferent datasets and social platforms except on Columbia,
+where CAT-Net v2 achieves better performance. On aver-
+age however, we have a gain of around 16%, 19%, 18% and
+18% with respect to the second best on Facebook, What-
+sapp, Weibo and WeChat, respectively.
+Comparison with ObjectFormer. Note that an exhaus-
+tive and equitable comparison with [42] is not feasible as
+they do not provide their trained model. We provide a pixel-
+level comparison of localization performance in Tab. 10 us-
+ing values for [31, 42] from the paper. Our method is com-
+petitive or better than [42] across various test datasets, and
+outperforms that on average.
+1Actually, we used the v1+ version [15], where real images of v1
+(shared with v2 and present in our training set) are replaced by images
+from the COREL dataset [43].
+Number of images Manipulation
+Name [ref] Real Fake Sp CM
+CASIA v2 [16] 7491 5105 ✓ ✓
+FantasticReality [25] 16592 19423 ✓
+IMD2020 [36] 414 2010 ✓ ✓
+tampered COCO [26] - 400K ✓ ✓
+tampered RAISE [26] 24462 400K ✓
+CASIA v1+ [15] 800 921 ✓ ✓
+Coverage [44] 100 100 ✓
+Columbia [21] 183 180 ✓
+NIST16 [20] 160 160 ✓ ✓
+DSO-1 [14] 100 100 ✓
+VIPP [7] 69 69 ✓ ✓
+OpenForensics [28] - 2000 ✓
+CocoGlide 512 512 ✓
+Table 8. List of datasets used for training and testing (Sp=splicing,
+CM=copymove).
+10
+===== PAGE 11 =====
+orig. 3 7 11 15 19 23
+Gaussian blurring
+0.2
+0.4
+0.6
+0.8F1
+orig. 3 7 11 15 19 23
+Gaussian noise
+0.2
+0.4
+0.6
+0.8F1
+5060708090100orig.
+JPEG compression
+0.2
+0.4
+0.6
+0.8F1
+0.70.8511.151.3
+Gamma correction
+0.2
+0.4
+0.6
+0.8F1
+CAT-Net v2 MVSS-Net IF-OSN TruFor (Ours)
+Figure 9. Robustness analysis against different processing operations on CASIA v1. Pixel-level F1 performance (best threshold) is shown.
+CASIA v1 Columbia DSO-1 NIST16 A VG
+Method Fb Wa Wb Wc Fb Wa Wb Wc Fb Wa Wb Wc Fb Wa Wb Wc Fb Wa Wb Wc
+IF-OSN [45] .513 .524 .507 .454 .741 .752 .756 .760 .484 .395 .416 .414 .315 .302 .292 .282 .513 .493 .493 .478
+CAT-Net v2 [26] .681 .508 .469 .206 .964 .952 .958 .903 .310 .247 .240 .237 .219 .238 .243 .244 .544 .486 .478 .398
+MVSS-Net [8] .469 .444 .480 .339 .752 .747 .758 .752 .356 .308 .354 .329 .305 .252 .300 .269 .471 .438 .473 .422
+TruFor (ours) .716 .713 .676 .615 .797 .798 .835 .820 .685 .465 .515 .469 .338 .384 .308 .358 .634 .590 .584 .566
+Table 9. Pixel-level F1 performance (fixed threshold) on datasets uploaded on Facebook (Fb), WhatsApp (Wa), Weibo (Wb), WeChat
+(Wc).
+Method Columbia Coverage CASIA v1 NIST16 Avg
+ManTraNet .824 .819 .817 .795 .814
+SPAN .936 .922 .797 .840 .874
+PSCCNet .982 .847 .829 .855 .878
+ObjectFormer .955 .928 .843 .872 .900
+TruFor .947 .925 .957 .877 .927
+Table 10. Pixel-level AUC, for the comparisons the values are
+taken from Tab. 1 of [42]
+D. Additional detection results
+In this Section, we give some more insights on the image
+level detection performance of our method. We first inves-
+tigate the role of the confidence map in the detection strat-
+egy. In Tab. 11, we perform an ablation where we observe
+substantial improvements with the confidence maps both in
+terms of AUC and Accuracy.
+Image-level metrics require calibrating the detection
+score for a particular dataset (or certain methods fine-tune
+on specific datasets [42]). In Tab. 2 of the main paper, we
+report the balanced accuracies evaluated on seven datasets,
+and the average of them considering a fixed threshold equal
+to 0.5. For methods that do not provide an explicit detec-
+tion score, we use max pooling on the localization map.
+In Fig. 10, we show the accuracy (averaged over the seven
+datasets) as a function of the threshold. One can observe the
+accuracy of other methods, which rely on max pooling, in-
+crease with higher thresholds - this is indicative of many
+false positives in the localization maps from these meth-
+ods. In contrast, our method combines various confidence
+weighted pooling statistics, making it more robust.
+Table 12 shows the true negative rate (TNR), true pos-
+itive rate (TPR), and average accuracy considering both a
+fixed threshold of 0.5 and the best threshold for each tech-
+nique. We can notice that using a fixed threshold with our
+method we can significantly decrease the false alarms rate
+(around 80% lower) at the cost of increasing miss detection
+(around 30% higher), by achieving an average improvement
+in terms of accuracy of 25%. All the state-of-the-art ap-
+proaches have the problem of a high number of false alarms
+with a best threshold that assumes values almost equal to
+1. Also in this experiment where results are averaged on all
+seven datasets, we can appreciate the importance to include
+the confidence analysis during detection.
+E. Qualitative results
+In Fig. 11 we show some results on fake and pristine im-
+ages together with the relative confidence map and the final
+integrity score. We can see that the confidence map can
+help to correct false positive predictions and provide a more
+reliable integrity score. Instead, in Fig. 12 different failure
+cases. In the first row, the manipulation was correctly lo-
+calized, however, the confidence map wrongly hints that it
+could be a false alarm. A possible explanation is that the
+area is very uniform, which can lead to false positives. A
+similar situation is presented in the second row, since the
+plant has a very uniform and dark texture, which misleads
+the confidence extractor. Another failure case can be rep-
+resented by the other way around, where we have a false
+positive on a pristine image, and the confidence map not
+correcting it.
+In Fig. 13 we show some qualitative results on manip-
+11
+===== PAGE 12 =====
+0.0 0.2 0.4 0.6 0.8 1.0
+threshold
+0.45
+0.50
+0.55
+0.60
+0.65
+0.70
+0.75
+0.80
+0.85avg Acc
+CAT-Net v2
+MVSS-Net
+IF-OSN
+TruFor (ours)
+TruFor (w/o conf.)
+TruFor (max)
+Figure 10. Image-level Detection Accuracy as a function of detec-
+tion score threshold (averaged over 7 test datasets).
+Original Res Res&Cmp
+AUC Acc AUC Acc AUC Acc
+w/o conf. map .877 .785 .847 .730 .719 .610
+w conf. map .996 .905 .949 .910 .740 .675
+Table 11. Ablation image-level results in terms of AUC and accu-
+racy considering the use (or not) of the confidence map.
+fixed best
+TNR TPR Acc th TNR TPR Acc
+CAT-Net v2 .416 .882 .649 .955 .840 .618 .729
+IF-OSN .182 .907 .545 .968 .763 .548 .656
+MVSS-Net .285 .886 .586 .957 .806 .544 .675
+TruFor (max) .109 .967 .538 .996 .900 .573 .736
+TruFor (w/o c.) .859 .575 .717 .427 .818 .640 .729
+TruFor .909 .656 .783 .380 .851 .729 .790
+Table 12. Detection results: Image-level TNR, TPR, and Accuracy
+averaged on seven datasets (fixed and best threshold).
+ulated images (the forged area is outlined in yellow) and
+compare with the state-of-the-art. For these examples, the
+localized area appears sharper and more accurate than the
+other methods. We also add the confidence maps that can
+tell us the level of reliability of the anomaly maps and re-
+move potential false alarms. Note the dark regions on the
+boundary of real forgeries - indicating lower confidence in
+the anomaly label assignment of intermediate regions.
+Finally, in Fig. 14, we show a few examples of false
+alarms on pristine images. Other methods tend to focus
+on semantically relevant or highly saturated regions lead-
+ing to false detections. TruFor’s localization maps exhibit a
+weaker response, and most of these are discarded due to the
+confidence map, leading to a correct image-level decision.
+Image Localization Map Confidence Map
+0.957
+0.957
+0.200
+0.231
+Figure 11. Examples of forged (top) and pristine (bottom) images
+(forgeries are highlighted in yellow). We show the localization
+map, the confidence map and the integrity score. For real images
+despite the anomaly map presenting some false alarms, the confi-
+dence analysis helps to make a correct prediction.
+Image Localization Map Confidence Map
+Figure 12. Examples of failure cases on fake and real images (forg-
+eries are highlighted in yellow).
+References
+[1] Omri Avrahami, Ohad Fried, and Dani Lischinski. Blended
+latent diffusion. arXiv preprint arXiv:2206.02779, 2022. 1,
+8
+[2] Quentin Bammey, Rafael Grompone von Gioi, and Jean-
+Michel Morel. An adaptive neural network for unsuper-
+vised mosaic consistency analysis in image forensics. In
+IEEE/CVF Conference on Computer Vision and Pattern
+Recognition (CVPR), June 2020. 2, 6, 7
+[3] Belhassen Bayar and Matthew C Stamm. A deep learning
+12
+===== PAGE 13 =====
+Image Noiseprint ManTraNet CAT‐net v2 IF‐OSN MVSS‐Net TruFor (ou rs) Conf. Map
+Figure 13. Some qualitative results, compared with the state-of-the-art, on manipulated images (the forged area is outlined in yellow). Dark
+regions in the confidence map indicate regions of low confidence in the TruFor localization map.
+13
+===== PAGE 14 =====
+Image Noiseprint ManTraNet CAT‐net v2 IF‐OSN MVSS‐Net TruFor (ou rs) Conf. Map
+Figure 14. Some qualitative results, compared with the state-of-the-art, on pristine images. Dark regions in the confidence map indicate
+regions of low confidence in the TruFor localization map.
+approach to universal image manipulation detection using a
+new convolutional layer. In ACM Workshop on Information
+Hiding and Multimedia Security, pages 5–10, 2016. 2
+[4] Christian Riess Benedikt Lorch, Anatol Maier. Reliable
+JPEG Forensics via Model Uncertainty. In IEEE Workshop
+on Information Forensics and Security (WIFS), 2020. 3
+[5] Xiuli Bi, Yang Wei, Bin Xiao, and Weisheng Li. RRU-Net:
+The Ringed Residual U-Net for Image Splicing Forgery De-
+tection. In IEEE/CVF Conference on Computer Vision and
+Pattern Recognition (CVPR) Workshops, June 2019. 2, 6, 7
+[6] Tiziano Bianchi, Alessia De Rosa, and Alessandro Piva. Im-
+proved DCT coefficient analysis for forgery localization in
+JPEG images. In IEEE International Conference on Acous-
+tics, Speech and Signal Processing (ICASSP) , pages 2444–
+2447, 2011. 2, 6, 7
+[7] Tiziano Bianchi and Alessandro Piva. Image Forgery Lo-
+calization via Block-Grained Analysis of JPEG Artifacts.
+IEEE Transactions on Information Forensics and Security ,
+7(3):1003–1017, 2012. 6, 10
+[8] Xinru Chen, Chengbo Dong, Jiaqi Ji, Juan Cao, and Xirong
+Li. Image manipulation detection by multi-view multi-
+scale supervision. In IEEE/CVF International Conference
+on Computer Vision (ICCV), October 2021. 2, 6, 7, 10, 11
+[9] Charles Corbi `ere, Nicolas Thome, Avner Bar-Hen, Matthieu
+14
+===== PAGE 15 =====
+Cord, and Patrick P ´erez. Addressing failure prediction by
+learning model confidence. In Advances in Neural Informa-
+tion Processing Systems (NeurIPS), pages 2902–2913, 2019.
+3, 5
+[10] Davide Cozzolino, Giovanni Poggi, and Luisa Verdoliva.
+Splicebuster: A new blind image splicing detector. In IEEE
+International Workshop on Information Forensics and Secu-
+rity (WIFS), pages 1–6, 2015. 6, 7
+[11] Davide Cozzolino, Giovanni Poggi, and Luisa Verdoliva.
+Data-Driven Digital Integrity Verification , pages 281–311.
+Springer, 2022. 2
+[12] Davide Cozzolino and Luisa Verdoliva. Noiseprint: A CNN-
+Based Camera Model Fingerprint. IEEE Transactions on In-
+formation Forensics and Security, 15:144–159, 2020. 2, 3,
+4, 6, 7, 8
+[13] Duc-Tien Dang-Nguyen, Cecilia Pasquini, Valentina Conot-
+ter, and Giulia Boato. Raise: A raw images dataset for digital
+image forensics. In Proceedings of the 6th ACM Multimedia
+Systems Conference, MMSys ’15, page 219–224, 2015. 10
+[14] Tiago Jos ´e de Carvalho, Christian Riess, Elli Angelopoulou,
+H´elio Pedrini, and Anderson de Rezende Rocha. Exposing
+digital image forgeries by illumination color classification.
+IEEE Transactions on Information Forensics and Security ,
+8(7):1182–1194, 2013. 6, 10
+[15] Chengbo Dong, Xinru Chen, Ruohan Hu, Juan Cao, and
+Xirong Li. MVSS-Net: Multi-View Multi-Scale Super-
+vised Networks for Image Manipulation Detection. IEEE
+Transactions on Pattern Analysis and Machine Intelligence,
+45(3):3539–3553, 2023. 6, 10
+[16] Jing Dong, Wei Wang, and Tieniu Tan. CASIA image tam-
+pering detection evaluation database. In IEEE China Sum-
+mit and International Conference on Signal and Information
+Processing, pages 422–426, 2013. 5, 10
+[17] Jessica Fridrich and Jan Kodovsky. Rich models for steganal-
+ysis of digital images. IEEE Transactions on Information
+Forensics and Security, 7(3):868–882, 2012. 2
+[18] Rinon Gal, Yuval Alaluf, Yuval Atzmon, Or Patash-
+nik, Amit H. Bermano, Gal Chechik, and Daniel Cohen-
+Or. An image is worth one word: Personalizing text-to-
+image generation using textual inversion. arXiv preprint
+arXiv:2208.01618, 2022. 8
+[19] Jakob Gawlikowski, Cedrique Rovile Njieutcheu Tassi,
+Mohsin Ali, Jongseok Lee, Matthias Humt, Jianxiang Feng,
+Anna Kruspe, Rudolph Triebel, Peter Jung, Ribana Roscher,
+et al. A survey of uncertainty in deep neural networks. arXiv
+preprint arXiv:2107.03342v3, 2021. 3
+[20] H. Guan, M. Kozak, E. Robertson, Y . Lee, A.N. Yates, A.
+Delgado, D. Zhou, T. Kheyrkhah, J. Smith, and J. Fiscus.
+MFC datasets: Large-scale benchmark datasets for media
+forensic challenge evaluation. In IEEE WACV Workshops,
+pages 63–72, 2019. 6, 10
+[21] Yu-feng Hsu and Shih-Fu Chang. Detecting image splicing
+using geometry invariants and camera characteristics consis-
+tency. In IEEE International Conference on Multimedia and
+Expo (ICME), pages 549–552, 2006. 6, 10
+[22] Xuefeng Hu, Zhihan Zhang, Zhenye Jiang, Syomantak
+Chaudhuri, Zhenheng Yang, and Ram Nevatia. SPAN: Spa-
+tial pyramid attention network for image manipulation lo-
+calization. In European Conference on Computer Vision
+(ECCV), pages 312–328. Springer, 2020. 2, 6, 7, 10
+[23] Minyoung Huh, Andrew Liu, Andrew Owens, and Alexei A.
+Efros. Fighting fake news: Image splice detection via
+learned self-consistency. In European Conference on Com-
+puter Vision (ECCV), September 2018. 2, 6, 7
+[24] Prannay Khosla, Piotr Teterwak, Chen Wang, Aaron Sarna,
+Yonglong Tian, Phillip Isola, Aaron Maschinot, Ce Liu,
+and Dilip Krishnan. Supervised contrastive learning. Ad-
+vances in Neural Information Processing Systems (NeurIPS),
+33:18661–18673, 2020. 4
+[25] Vladimir V . Kniaz, Vladimir Knyaz, and Fabio Remondino.
+The point where reality meets fantasy: Mixed adversarial
+generators for image splice detection. In Advances in Neu-
+ral Information Processing Systems (NeurIPS) , volume 32,
+2019. 10
+[26] Myung-Joon Kwon, Seung-Hun Nam, In-Jae Yu, Heung-
+Kyu Lee, and Changick Kim. Learning JPEG Compression
+Artifacts for Image Manipulation Detection and Localiza-
+tion. International Journal of Computer Vision, pages 1–21,
+2022. 2, 5, 6, 7, 9, 10, 11
+[27] Myung-Joon Kwon, In-Jae Yu, Seung-Hun Nam, and
+Heung-Kyu Lee. CAT-Net: Compression Artifact Tracing
+Network for Detection and Localization of Image Splicing.
+In IEEE Winter Conference on Applications of Computer Vi-
+sion (WACV), pages 375–384, 2021. 2
+[28] Trung-Nghia Le, Huy H. Nguyen, Junichi Yamagishi, and
+Isao Echizen. OpenForensics: Large-Scale Challenging
+Dataset for Multi-Face Forgery Detection and Segmenta-
+tion In-the-Wild. In IEEE/CVF International Conference
+on Computer Vision (ICCV) , pages 10117–10127, October
+2021. 1, 6, 10
+[29] Tsung-Yi Lin, Michael Maire, Serge Belongie, James Hays,
+Pietro Perona, Deva Ramanan, Piotr Doll´ar, and C. Lawrence
+Zitnick. Microsoft COCO: Common objects in context. In
+European Conference on Computer Vision (ECCV) , pages
+740–755, 2014. 6, 10
+[30] Huayao Liu, Jiaming Zhang, Kailun Yang, Xinxin Hu, and
+Rainer Stiefelhagen. CMX: Cross-Modal Fusion for RGB-X
+Semantic Segmentation with Transformers. arXiv preprint
+arXiv:2203.04838, 2022. 2, 4, 9
+[31] Xiaohong Liu, Yaojie Liu, Jun Chen, and Xiaoming Liu.
+PSCC-Net: Progressive spatio-channel correlation network
+for image manipulation detection and localization. IEEE
+Transactions on Circuits and Systems for Video Technology,
+32(11):7505–7517, november 2022. 2, 6, 7, 10
+[32] Anatol Maier, Benedikt Lorch, and Christian Riess. To-
+ward reliable models for authenticating multimedia content:
+detecting resampling artifacts with Bayesian Neural Net-
+works. In IEEE International Conference on Image Process-
+ing (ICIP), pages 1251–1255, 2020. 3
+[33] Francesco Marra, Diego Gragnaniello, Luisa Verdoliva, and
+Giovanni Poggi. A Full-Image Full-Resolution End-to-End-
+Trainable CNN Framework for Image Forgery Detection.
+IEEE Access, 8:133488–133502, 2020. 2, 6, 7
+[34] Fausto Milletari, Nassir Navab, and Seyed-Ahmad Ahmadi.
+V-Net: Fully Convolutional Neural Networks for V olumetric
+15
+===== PAGE 16 =====
+Medical Image Segmentation. In Fourth International Con-
+ference on 3D Vision (3DV), pages 565–571, 2016. 5
+[35] Alexander Quinn Nichol, Prafulla Dhariwal, Aditya Ramesh,
+Pranav Shyam, Pamela Mishkin, Bob Mcgrew, Ilya
+Sutskever, and Mark Chen. GLIDE: Towards photorealis-
+tic image generation and editing with text-guided diffusion
+models. In International Conference on Machine Learning,
+volume 162, pages 16784–16804, Jul 2022. 1, 6, 10
+[36] Adam Novozamsky, Babak Mahdian, and Stanislav Saic.
+IMD2020: A large-scale annotated dataset tailored for de-
+tecting manipulated images. In IEEE/CVF WACV Work-
+shops, 2020. 10
+[37] Jinseok Park, Donghyeon Cho, Wonhyuk Ahn, and Heung-
+Kyu Lee. Double JPEG Detection in Mixed JPEG Quality
+Factors using Deep Convolutional Neural Network. In Eu-
+ropean Conference on Computer Vision (ECCV), September
+2018. 2
+[38] Yuan Rao and Jiangqun Ni. A deep learning approach to
+detection of splicing and copy-move forgeries in images. In
+IEEE International Workshop on Information Forensics and
+Security (WIFS), pages 1–6, 2016. 2
+[39] Yuan Rao, Jiangqun Ni, and Hao Xie. Multi-semantic CRF-
+based attention model for image forgery detection and local-
+ization. Signal Processing, 183:108051, 2021. 2
+[40] Ronald Salloum, Yuzhuo Ren, and C-C Jay Kuo. Image
+splicing localization using a multi-task fully convolutional
+network (MFCN). Journal of Visual Communication and Im-
+age Representation, pages 201–209, 2018. 2
+[41] Luisa Verdoliva. Media forensics and deepfakes: An
+overview. IEEE Journal of Selected Topics in Signal Pro-
+cessing, 14(5):910–932, 2020. 2, 3
+[42] Junke Wang, Zuxuan Wu, Jingjing Chen, Xintong Han, Ab-
+hinav Shrivastava, Ser-Nam Lim, and Yu-Gang Jiang. Ob-
+jectFormer for image manipulation detection and localiza-
+tion. In IEEE/CVF Conference on Computer Vision and Pat-
+tern Recognition (CVPR), June 2022. 2, 10, 11
+[43] James Ze Wang, Jia Li, and Gio Wiederhold. Simplicity:
+semantics-sensitive integrated matching for picture libraries.
+IEEE Transactions on Pattern Analysis and Machine Intelli-
+gence, 23(9):947–963, 2001. 10
+[44] Bihan Wen, Ye Zhu, Ramanathan Subramanian, Tian-Tsong
+Ng, Xuanjing Shen, and Stefan Winkler. COVERAGE —
+A novel database for copy-move forgery detection. In IEEE
+International Conference on Image Processing (ICIP), pages
+161–165, 2016. 5, 10
+[45] Haiwei Wu, Jiantao Zhou, Jinyu Tian, and Jun Liu. Robust
+image forgery detection over online social network shared
+images. In IEEE/CVF Conference on Computer Vision and
+Pattern Recognition (CVPR), June 2022. 6, 7, 10, 11
+[46] Yue Wu, Wael AbdAlmageed, and Premkumar Natarajan.
+ManTra-Net: Manipulation Tracing Network for Detection
+and Localization of Image Forgeries With Anomalous Fea-
+tures. In IEEE/CVF Conference on Computer Vision and
+Pattern Recognition (CVPR), June 2019. 2, 6, 7
+[47] Enze Xie, Wenhai Wang, Zhiding Yu, Anima Anandkumar,
+Jose M Alvarez, and Ping Luo. SegFormer: Simple and
+efficient design for semantic segmentation with transform-
+ers. Advances in Neural Information Processing Systems
+(NeurIPS), 34:12077–12090, 2021. 4, 5, 9
+[48] Chao Yang, Huizhou Li, Fangting Lin, Bin Jiang, and Hao
+Zhao. Constrained R-CNN: A General Image Manipulation
+Detection Model. In IEEE International Conference on Mul-
+timedia and Expo (ICME), pages 1–6, 2020. 2, 6, 7, 10
+[49] Kai Zhang, Wangmeng Zuo, Yunjin Chen, Deyu Meng, and
+Lei Zhang. Beyond a gaussian denoiser: Residual learning
+of deep CNN for image denoising. IEEE Transactions on
+Image Processing, 26(7):3142–3155, 2017. 4
+[50] Rongyu Zhang and Jiangqun Ni. A dense U-Net with cross-
+layer intersection for detection and localization of image
+forgery. In IEEE International Conference on Acoustics,
+Speech and Signal Processing (ICASSP), pages 2982–2986,
+2020. 2
+[51] Peng Zhou, Xintong Han, Vlad I. Morariu, and Larry S.
+Davis. Learning rich features for image manipulation detec-
+tion. In IEEE Conference on Computer Vision and Pattern
+Recognition (CVPR), June 2018. 2, 10
+16

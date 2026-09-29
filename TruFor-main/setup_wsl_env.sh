@@ -4,7 +4,7 @@
 #
 # 用法：
 #   1) 在 Windows 侧：wsl -d Ubuntu-22.04
-#   2) 在 WSL 内：    bash /mnt/d/trufor/TruFor-main/setup_wsl_env.sh
+#   2) 在 WSL 内：    bash /mnt/d/trufor_kaggle/TruFor-main/setup_wsl_env.sh
 #   3) 激活环境：     source ~/miniconda3/etc/profile.d/conda.sh && conda activate trufor
 #
 # 注意：sudo 会要求输入 WSL 用户密码；数据集需自行下载（见文件末尾提示）

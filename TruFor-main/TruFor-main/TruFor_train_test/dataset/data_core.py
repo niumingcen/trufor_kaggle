@@ -37,6 +37,9 @@ class myDataset(Dataset):
                 
             if 'IMD' in training_set:
                 self.dataset_list.append(IMD2020(crop_size, grid_crop, "dataset/data/IMD_train_list.txt", aug=aug))
+                # 检测头需要负样本：IMD 的 414 张原图（掩码为 None）在 *_auth_train_list.txt 里
+                if config.DATASET.USE_REAL:
+                    self.dataset_list.append(IMD2020(crop_size, grid_crop, "dataset/data/IMD_auth_train_list.txt", aug=aug))
                 
             if 'CA' in training_set:
                 self.dataset_list.append(CASIA(crop_size, grid_crop, "dataset/data/CASIA_v2_train_list.txt", aug=aug))
@@ -59,6 +62,8 @@ class myDataset(Dataset):
                 
             if 'IMD' in valid_set:
                 self.dataset_list.append(IMD2020(crop_size, grid_crop, "dataset/data/IMD_valid_list.txt", max_dim=max_dim, aug=aug))
+                if config.DATASET.USE_REAL:
+                    self.dataset_list.append(IMD2020(crop_size, grid_crop, "dataset/data/IMD_auth_valid_list.txt", max_dim=max_dim, aug=aug))
             
             if 'CA' in valid_set:
                 self.dataset_list.append(CASIA(crop_size, grid_crop, "dataset/data/CASIA_v2_valid_list.txt", max_dim=max_dim, aug=aug))

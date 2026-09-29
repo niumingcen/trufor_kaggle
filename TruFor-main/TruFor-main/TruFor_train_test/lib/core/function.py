@@ -48,6 +48,12 @@ def train(epoch, num_epoch, epoch_iters, base_lr, num_iters,
         losses, *_ = model(labels=labels, rgbs=rgbs)
         loss = losses.mean()
 
+        # 阶段3 的 CONF/DET 会偶发非有限值（数据增强造出的退化裁剪让 MSELoss 对空集合求均值）。
+        # 这种 step 一旦 backward，动量会把它扩散到整个网络，之后所有权重都是 NaN，所以直接跳过。
+        if not torch.isfinite(loss):
+            logging.warning(f'Epoch {epoch} iter {i_iter}: 非有限损失 {losses.tolist()}，跳过该 step')
+            continue
+
         model.zero_grad()
         loss.backward()
         optimizer.step()
@@ -122,7 +128,8 @@ def validate(config, testloader, model, writer_dict, valid_set="valid"):
                 tcp  = pred_prob[:,1]*(label==1) + pred_prob[:,0]*(label==0)
             
             loss = losses.mean()
-            avg_loss.update(loss.item())
+            if torch.isfinite(loss):        # 非有限值不计入平均，否则整轮验证报告都是 nan
+                avg_loss.update(loss.item())
 
             smooth = 1.
 

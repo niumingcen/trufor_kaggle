@@ -5,7 +5,7 @@
 # 用法（Windows 侧）：
 #   wsl -d Ubuntu-22.04 -- bash -s < run_train.sh
 # 或先进入 WSL 再执行：
-#   bash /mnt/d/trufor/TruFor-main/run_train.sh [--sync] [其它 train.py 参数]
+#   bash /mnt/d/trufor_kaggle/TruFor-main/run_train.sh [--sync] [其它 train.py 参数]
 #
 #   --sync   先把 Windows 侧改过的代码同步到 WSL 内的副本 ~/TruFor 再训练
 #   例：--sync TRAIN.END_EPOCH 20 VALID.FIRST_VALID True
@@ -13,7 +13,7 @@
 set -euo pipefail
 
 EXP="${EXP:-trufor_ph2_imd}"
-WIN_SRC="/mnt/d/trufor/TruFor-main/TruFor-main"
+WIN_SRC="/mnt/d/trufor_kaggle/TruFor-main/TruFor-main"
 
 if [ "${1:-}" = "--sync" ]; then
     shift

@@ -10,10 +10,13 @@
 # 用法（在 TruFor_train_test 目录下；-g 必须紧跟 GPU 编号、放在 -exp 之前，
 # 因为 argparse 的 -g 是 nargs='+'，会吞掉后面的 TRAIN.xxx 覆盖项）：
 #   python train.py -g 0 1 -exp trufor_ph2_imd_kaggle
+#   - WORKERS: 16 -> 8（Kaggle 约 12 vCPU）
+# cuDNN 保持关闭（与官方一致）：T4 + 新版 cuDNN 打开 BENCHMARK 会在 FeatureRectifyModule 的
+# conv 上报 "FIND was unable to find an engine to execute this computation"，与显存无关。
 CUDNN:
-  BENCHMARK: true
+  BENCHMARK: false
   DETERMINISTIC: false
-  ENABLED: true
+  ENABLED: false
 WORKERS: 8
 
 DATASET:

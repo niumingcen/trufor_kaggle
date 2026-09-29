@@ -66,6 +66,9 @@ _C.DATASET.TRAIN = []
 _C.DATASET.VALID = []
 _C.DATASET.NUM_CLASSES = 2
 _C.DATASET.CLASS_WEIGHTS = [0.5, 2.5]
+# 是否把各数据集的“真实图”列表（*_auth_*_list.txt，掩码为 None）也加进训练/验证。
+# 阶段 1/2（定位）不需要，保持 False 与官方行为一致；阶段 3 的检测头必须有负样本，必须打开。
+_C.DATASET.USE_REAL = False
 
 # Training parameters
 _C.TRAIN = CN()

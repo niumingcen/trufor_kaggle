@@ -1,0 +1,62 @@
+# 阶段3（置信图 + 检测头）训练配置 —— Kaggle 2×Tesla T4 版
+# 起点：阶段 2 在同一 Kaggle 环境训 30 epoch 的 best.pth.tar（best_key=avg_p-F1_smooth=0.5963）
+# 与官方 trufor_ph3.yaml 的差异：
+#   - 只用 IMD2020（官方是 IMD/FR/CA/COCO/RAISE 五个），所以必须 USE_REAL: true 才有负样本
+#   - BATCH_SIZE_PER_GPU: 18 -> 8（T4 15GB；阶段3 冻结 backbone/loc_head，显存比阶段2 宽裕）
+#   - WORKERS: 16 -> 8（Kaggle 约 12 vCPU）
+#   - VALID.MAX_SIZE: 2048 -> 1024（T4 整图验证的显存上限）
+#   - END_EPOCH: 100 -> 40、VALID.EVERY: 5（整图验证占总时长 90% 以上）
+#   - PRETRAINING 指向 notebook 预先放好的阶段2权重
+# 用法（在 TruFor_train_test 目录下）：python train.py -g 0 1 -exp trufor_ph3_imd_kaggle
+CUDNN:
+  BENCHMARK: false
+  DETERMINISTIC: false
+  ENABLED: false
+WORKERS: 8
+
+DATASET:
+  TRAIN: [IMD]
+  VALID: [IMD]
+  USE_REAL: true
+  NUM_CLASSES: 2
+  CLASS_WEIGHTS: [0.5, 2.5]
+MODEL:
+  NAME: detconfcmx
+  PRETRAINED: 'pretrained_models/segformers/mit_b2.pth'
+  MODS: ('RGB','NP++')
+  EXTRA:
+      BACKBONE: mit_b2
+      DECODER: MLPDecoder
+      DECODER_EMBED_DIM: 512
+      PREPRC: 'imagenet'
+      BN_EPS: 0.001
+      BN_MOMENTUM: 0.1
+      NP_WEIGHTS: 'pretrained_models/noiseprint++/noiseprint++.th'
+      MODULES: ['NP++','backbone','loc_head','conf_head','det_head']
+      FIX_MODULES: ['NP++','backbone','loc_head']
+      DETECTION: 'confpool'
+LOSS:
+  LOSSES:
+    - ['CONF', 1.0, 'mse']
+    - ['DET', 0.5, 'cross_entropy']
+  SMOOTH: 0
+TRAIN:
+  PRETRAINING: 'weights/trufor_ph2_imd_kaggle/best.pth.tar'
+  IMAGE_SIZE: [512,512]
+  BATCH_SIZE_PER_GPU: 8
+  SHUFFLE: true
+  BEGIN_EPOCH: 0
+  END_EPOCH: 40
+  OPTIMIZER: sgd
+  LR: 0.005
+  WD: 0.0005
+  MOMENTUM: 0.9
+  NESTEROV: false
+  IGNORE_LABEL: -1
+  AUG: 'lib/config/aug_res_comp.yaml'
+VALID:
+  FIRST_VALID: false
+  EVERY: 5
+  MAX_SIZE: 1024
+  BEST_KEY: 'avg_det_bacc'
+  AUG: 'lib/config/aug_res_comp.yaml'

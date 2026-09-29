@@ -1,0 +1,63 @@
+# 阶段3（置信图 + 检测头）训练配置 —— 本机 RTX 3070 Laptop 8GB 适配版
+# 起点：阶段 2 在 Kaggle T4×2 训 30 epoch 的 best.pth.tar（best_key=avg_p-F1_smooth, 0.5963）
+# 与官方 trufor_ph3.yaml 的差异：
+#   - 只用 IMD2020 单数据集（官方是 IMD/FR/CA/COCO/RAISE 五个）
+#   - PRETRAINING 指向本机的阶段 2 产物
+#   - BATCH_SIZE_PER_GPU: 18 -> 2、WORKERS: 16 -> 4（8GB 显存 / 8C16T）
+#   - VALID.MAX_SIZE: 2048 -> 1024；END_EPOCH 先设 5（试跑看收敛）
+# 冻结 NP++/backbone/loc_head，只训 conf_head（置信解码器）与 det_head（检测头）
+# 用法：python train.py -exp trufor_ph3_imd_local
+CUDNN:
+  BENCHMARK: false
+  DETERMINISTIC: false
+  ENABLED: false
+WORKERS: 4
+
+DATASET:
+  TRAIN: [IMD]
+  VALID: [IMD]
+  # 必须为 true：检测头要有负样本才学得会。打开后每 epoch 从 1868 张篡改图里随机取 386 张
+  # 与 386 张 IMD 原图配对（myDataset 的类别均衡采样按最小列表取），验证集变成 141 假 + 28 真。
+  USE_REAL: true
+  NUM_CLASSES: 2
+  CLASS_WEIGHTS: [0.5, 2.5]
+MODEL:
+  NAME: detconfcmx
+  PRETRAINED: 'pretrained_models/segformers/mit_b2.pth'
+  MODS: ('RGB','NP++')
+  EXTRA:
+      BACKBONE: mit_b2
+      DECODER: MLPDecoder
+      DECODER_EMBED_DIM: 512
+      PREPRC: 'imagenet'
+      BN_EPS: 0.001
+      BN_MOMENTUM: 0.1
+      NP_WEIGHTS: 'pretrained_models/noiseprint++/noiseprint++.th'
+      MODULES: ['NP++','backbone','loc_head','conf_head','det_head']
+      FIX_MODULES: ['NP++','backbone','loc_head']
+      DETECTION: 'confpool'
+LOSS:
+  LOSSES:
+    - ['CONF', 1.0, 'mse']
+    - ['DET', 0.5, 'cross_entropy']
+  SMOOTH: 0
+TRAIN:
+  PRETRAINING: 'weights/trufor_ph2_imd_kaggle/best.pth.tar'
+  IMAGE_SIZE: [512,512]
+  BATCH_SIZE_PER_GPU: 2
+  SHUFFLE: true
+  BEGIN_EPOCH: 0
+  END_EPOCH: 5
+  OPTIMIZER: sgd
+  LR: 0.005
+  WD: 0.0005
+  MOMENTUM: 0.9
+  NESTEROV: false
+  IGNORE_LABEL: -1
+  AUG: 'lib/config/aug_res_comp.yaml'
+VALID:
+  FIRST_VALID: false
+  EVERY: 1
+  MAX_SIZE: 1024
+  BEST_KEY: 'avg_det_bacc'
+  AUG: 'lib/config/aug_res_comp.yaml'

@@ -61,6 +61,10 @@ class MSE(nn.Module):
                 
         conf = conf[valid]
         tcp  = tcp[valid]
+        if conf.numel() == 0:
+            # 整个裁剪都落在“不确定带”（既不确定干净、也不确定篡改）时没有可学习像素，
+            # 空张量上的 MSELoss 返回 nan 并污染权重；返回值为 0 但保留计算图。
+            return (pred * 0).sum()
         loss = self.criterion(conf, tcp)
         return loss
     
